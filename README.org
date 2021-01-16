@@ -1,0 +1,7 @@
+# -*- fill-column: 76; -*-
+#+Title: BNG - Linux router project
+#+Options: ^:nil
+
+This git-repo (goal is to) contain tools and designs for a Broadband Network
+Gateway (BNG) router based on Linux.
+
