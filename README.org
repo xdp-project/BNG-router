@@ -5,3 +5,43 @@
 This git-repo (goal is to) contain tools and designs for a Broadband Network
 Gateway (BNG) router based on Linux.
 
+We assume a setup like this:
+
+#+begin_src
+
+                      +--------------------------+
+                      |           BNG            |
+                      |                          |
+                      |                          |
+               <------+eth1                eth0  +-----> Upstream internet
+                      |                          |
+Customer       <------+eth2                      |
+interfaces            |                          |
+                      |...                       |
+                      |                          |
+               <------+ethX                      |
+                      |                          |
+                      +--------------------------+
+#+end_src
+
+
+Where the BNG box is a middlebox between one or more customer-facing
+interfaces, and an upstream connection. The customer interfaces use
+double-tagged VLANs where the outer VLAN tag determines the Point of
+Presence that the customer is connected to, and the inner VLAN tag is unique
+per customer.
+
+This setup should be transparent to the customer equipment, which means the
+BNG needs to add and remove VLAN tags for the traffic as needed, and do
+NAT'ing for IPv4 traffic. From the customer PoV it should appear like they
+are on their own layer-2 segment with the BNG being the only other host. It
+also needs to relay DHCP traffic to an upstream central DHCP server.
+Functions in scope are:
+
+- DHCP relay for v4 and v6
+- NAT'ing of traffic (for IPv4) and routing of customer prefixes (for IPv6
+  with prefix delegation)
+
+The idea is to use regular Linux stack functionality as much as possible
+(e.g., VLAN interfaces), but accelerate functions with XDP and TC-BPF where
+appropriate, for either functionality or performance reasons.
