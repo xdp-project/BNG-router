@@ -1,5 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-static const char *__doc__ = "DHCP relay program to add Option 82\n";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,12 +101,12 @@ int main(int argc, char **argv)
 	char dev[IF_NAMESIZE] = "";
 	bool do_unload = 0;
 	struct bpf_map *map = NULL;
-	struct bpf_obj *obj = NULL;
+	struct bpf_object *obj = NULL;
 	int map_fd;
 	int key = 0;
-	char server[15] = "";
-	struct in_addr addr;
-	__u16 ifindex;
+	struct in_addr addr = {};
+	bool addr_set = false;
+	__u16 ifindex = 0;
 
 	while ((opt = getopt_long(argc, argv, "hui:d:m:", options, NULL)) !=
 	       -1) {
@@ -128,6 +127,7 @@ int main(int argc, char **argv)
 					optarg);
 				return -EINVAL;
 			}
+			addr_set = true;
 			break;
 		case 'm':
 			if (strcmp(optarg, "skb") == 0) {
@@ -150,6 +150,15 @@ int main(int argc, char **argv)
 		}
 	}
 
+	if (!ifindex) {
+		fprintf(stderr, "Missing ifname\n");
+		return -EINVAL;
+	}
+	if (!addr_set) {
+		fprintf(stderr, "Missing server address\n");
+		return -EINVAL;
+	}
+
 	if (do_unload)
 		return xdp_link_detach(ifindex, xdp_flags);
 
@@ -161,7 +170,7 @@ int main(int argc, char **argv)
 		return -1;
 	}
 	if (prog_fd <= 0) {
-		printf("ERR: loading file: %s\n");
+		printf("ERR: loading file: %s\n", filename);
 		return -1;
 	}
 

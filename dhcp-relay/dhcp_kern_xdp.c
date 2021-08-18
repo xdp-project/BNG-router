@@ -138,7 +138,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx)
 	}
 
 	/* adjusting the packet head by delta size to insert option82 */
-	if (bpf_xdp_adjust_head(ctx, 0 - delta) < 0)
+	if (bpf_xdp_adjust_head(ctx, 0 - (int)delta) < 0)
 		return XDP_ABORTED;
 
 	data_end = (void *)(long)ctx->data_end;
