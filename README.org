@@ -36,11 +36,16 @@ BNG needs to add and remove VLAN tags for the traffic as needed, and do
 NAT'ing for IPv4 traffic. From the customer PoV it should appear like they
 are on their own layer-2 segment with the BNG being the only other host. It
 also needs to relay DHCP traffic to an upstream central DHCP server.
-Functions in scope are:
+
+Necessary features:
 
 - DHCP relay for v4 and v6
-- NAT'ing of traffic (for IPv4) and routing of customer prefixes (for IPv6
-  with prefix delegation)
+- Route customer traffic (IPv4 and IPv6)
+
+Nice to have:
+
+- NAT'ing of traffic (for IPv4 RFC6598 clients)
+- Traffic shaping
 
 The idea is to use regular Linux stack functionality as much as possible
 (e.g., VLAN interfaces), but accelerate functions with XDP and TC-BPF where
