@@ -12,10 +12,12 @@
 #define RAI_REMOTE_ID 2
 #define RAI_OPTION_LEN 2
 
-#define DEST_PORT 67  /* UDP destination port for dhcp */
-#define MAX_BYTES 280 /* Max bytes supported by xdp load/store apis */
+#define DHCP_SERVER_PORT 67
+#define DHCP_CLIENT_PORT 68
+#define DHCP_REQUEST 1
+#define DHCP_REPLY 2
 
-/* structure for sub-options in option 82*/
+/* Structure for sub-options in option 82 */
 struct sub_option {
 	__u8 option_id;
 	__u8 len;
@@ -28,6 +30,11 @@ struct dhcp_option_82 {
 	__u8 len;
 	struct sub_option circuit_id;
 	struct sub_option remote_id;
+};
+
+/*structure for dhcp option 255 */
+struct dhcp_option_255 {
+	__u8 t;
 };
 
 struct dhcp_packet {
