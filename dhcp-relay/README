@@ -29,3 +29,76 @@ sudo echo 1 > /proc/sys/net/ipv4/conf/all/accept_local
 
 Verify using tcpdump:
 sudo tcpdump -s 0 -i <netif> port 67 and port 68 -vvv
+
+====== TEST SETUP ======
+
+2 physical Linux servers connected back-to-back with a patch cable.
+
+===== Client =====
+
+Kernel: 5.4.0-72-generic
+NIC model: Mellanox Technologies MT27800 Family [ConnectX-5]
+NIC name: ens6f0
+
+Preparation:
+
+sudo ip link set ens6f0 up
+sudo ip link add link ens6f0 name ens6f0.83 type vlan id 83
+sudo ip link set ens6f0.83 up
+sudo ip link add link ens6f0.83 name ens6f0.83.20 type vlan id 20
+sudo ip link set ens6f0.83.20 up
+
+Test:
+
+sudo dhclient ens6f0.83.20
+
+===== BNG =====
+
+Kernel: 5.9.0-050900-lowlatency
+NIC model: Mellanox Technologies MT27800 Family [ConnectX-5]
+NIC name: ens6f0np0
+
+Preparation:
+
+sudo ip link set ens6f0np0 up
+sudo ip link add link ens6f0np0 name ens6f0np0.83 type vlan id 83
+sudo ip link set ens6f0np0.83 up
+sudo ip link add link ens6f0np0.83 name ens6f0np0.83.20 type vlan id 20
+sudo ip link set ens6f0np0.83.20 up
+
+sudo ethtool -K ens6f0np0 rxvlan off
+
+sudo echo 1 > /proc/sys/net/ipv4/conf/ens6f0np0.83.20/accept_local
+sudo echo 1 > /proc/sys/net/ipv4/ip_forward
+
+Test:
+
+# Launch XDP program
+sudo ./dhcp_user_xdp -i ens6f0np0 -d 192.168.4.20 -s 10.100.100.3
+
+# tcpdump upstream interface to verify that packet is forwarded
+sudo tcpdump -n -i eno1 port 67
+tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
+listening on eno1, link-type EN10MB (Ethernet), capture size 262144 bytes
+10:10:00.191071 IP 10.100.100.3.68 > 192.168.4.20.67: BOOTP/DHCP, Request from b8:59:9f:06:5a:98, length 300
+10:10:03.114784 IP 10.100.100.3.68 > 192.168.4.20.67: BOOTP/DHCP, Request from b8:59:9f:06:5a:98, length 300
+^C
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+
+# Open trace pipe to see debug messages from XDP program
+sudo cat /sys/kernel/debug/tracing/trace_pipe
+
+          <idle>-0       [003] d.s2 11051597.318498: bpf_trace_printk: Ethertype 800
+          <idle>-0       [003] d.s2 11051597.318499: bpf_trace_printk: Found VLAN tag 83 at depth 0
+          <idle>-0       [003] d.s2 11051597.318500: bpf_trace_printk: Found VLAN tag 20 at depth 1
+          <idle>-0       [003] d.s2 11051597.318501: bpf_trace_printk: Parsing DHCP packet, opcode 1, hops 0
+          <idle>-0       [003] d.s2 11051597.318502: bpf_trace_printk: Broadcast packet received, opcode 1, hops 0
+          <idle>-0       [003] d.s2 11051597.318503: bpf_trace_printk: Got option code 53 at offset 290, hex 122
+          <idle>-0       [003] d.s2 11051597.318504: bpf_trace_printk: Got option code 12 at offset 293, hex 125
+          <idle>-0       [003] d.s2 11051597.318506: bpf_trace_printk: Got option code 55 at offset 304, hex 130
+          <idle>-0       [003] d.s2 11051597.318508: bpf_trace_printk: Got option code 255 at offset 319, hex 13f
+          <idle>-0       [003] d.s2 11051597.318509: bpf_trace_printk: Going to write DHCP option at offset 319
+          <idle>-0       [003] d.s2 11051597.318510: bpf_trace_printk: Wrote DHCP option at offset 290, returning XDP_PASS
+^C
