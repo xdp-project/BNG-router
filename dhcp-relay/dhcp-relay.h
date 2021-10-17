@@ -21,7 +21,7 @@
 struct sub_option {
 	__u8 option_id;
 	__u8 len;
-	__u16 val;
+	char val[IF_NAMESIZE];
 };
 
 /*structure for dhcp option 82 */

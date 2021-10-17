@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #define SERVER_MAP "relay_config"
+#define DEVICE_MAP "device_name"
 #define XDP_OBJ "dhcp_kern_xdp.o"
 
 static const struct option options[] = {
@@ -102,8 +103,10 @@ int main(int argc, char **argv) {
 	char dev[IF_NAMESIZE] = "";
 	bool do_unload = 0;
 	struct bpf_map *map = NULL;
+	struct bpf_map *device_map = NULL;
 	struct bpf_object *obj = NULL;
 	int map_fd;
+	int device_map_fd;
 	int key = 0;
 	struct in_addr dhcp_server_addr = {};
 	struct in_addr relay_agent_addr = {};
@@ -197,7 +200,7 @@ int main(int argc, char **argv) {
 	memcpy(&hwaddr, (unsigned char *) ifr.ifr_hwaddr.sa_data, 6);
 	
 	//display mac address
-	printf("Mac : %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+	printf("Using device %s MAC: %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", dev, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 	
 	/* Load the BPF-ELF object file and get back first BPF_prog FD */
 	err = bpf_prog_load(filename, BPF_PROG_TYPE_XDP, &obj, &prog_fd);
@@ -255,6 +258,33 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
+	
+	/* read the map from prog object file and update the real
+	 * server IP to the map
+	 */
+	device_map = bpf_object__find_map_by_name(obj, DEVICE_MAP);
+	err = libbpf_get_error(device_map);
+	if (err) {
+		fprintf(stderr, "Could not find map %s in %s: %s\n", DEVICE_MAP,
+			XDP_OBJ, strerror(err));
+		device_map = NULL;
+		exit(-1);
+	}
+	device_map_fd = bpf_map__fd(device_map);
+	if (device_map_fd < 0) {
+		fprintf(stderr, "Could not get device map fd\n");
+		exit(-1);
+	}
+
+	// Set device name in map
+	key = 0;
+	err = bpf_map_update_elem(device_map_fd, &key, dev, BPF_ANY);
+	if (err) {
+		fprintf(stderr, "Could not update map %s in %s\n", DEVICE_MAP,
+			XDP_OBJ);
+		exit(-1);
+	}
+	
 	err = xdp_link_attach(ifindex, xdp_flags, prog_fd);
 	if (err)
 		return err;
