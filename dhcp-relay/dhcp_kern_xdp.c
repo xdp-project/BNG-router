@@ -2,7 +2,7 @@
 
 #include <linux/bpf.h>
 #include <linux/in.h>
-#include <net/if.h>				/* IF_NAMESIZE */
+#include <net/if.h>    /* IF_NAMESIZE */
 #include <bpf/bpf_helpers.h>
 #include <xdp/parsing_helpers.h>
 #include <xdp/context_helpers.h>
@@ -49,7 +49,7 @@ struct {
 	__uint(max_entries, 16384);
 } client_vlans SEC(".maps");
 
-/* Inserts DHCP option 82 into the received dhcp packet
+/* Inserts DHCP option 82 into the received DHCP packet
  * at the specified offset.
  */
 static __always_inline int write_dhcp_option_82(void *ctx, int offset,
@@ -57,14 +57,68 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 	struct dhcp_option_82 option;
 
 	option.t = DHO_DHCP_AGENT_OPTIONS;
-	option.len = sizeof(struct sub_option) + sizeof(struct sub_option);
+	option.len = sizeof (struct sub_option) + sizeof (struct sub_option);
 	option.circuit_id.option_id = RAI_CIRCUIT_ID;
-	option.circuit_id.len = IF_NAMESIZE;
-	memcpy(option.circuit_id.val, dev, IF_NAMESIZE);
-	//option.circuit_id.val = bpf_ntohs(vlans->id[0]);
+	option.circuit_id.len = sizeof(option.circuit_id.val);
+	
+	/* Reconstruct VLAN device name
+	 * Convert VLAN tags to ASCII from right to left, starting with
+	 * inner VLAN tag.
+	 * Device name is 16 characters long and prepended with dash, e.g.:
+	 * ----ens6f0.83.20
+	 * We avoid null bytes to ensure compatibility with DHCP servers that
+	 * interpret null as a string terminator.
+	 */
+	 
+	char buf[IF_NAMESIZE];
+	memset(buf, '-', sizeof (buf));
+	
+	int c = VLAN_ASCII_MAX;		/* We will need 4 bytes at most */
+	int i = IF_NAMESIZE - 1;
+	__u16 inner_vlan = vlans->id[1];
+	__u16 outer_vlan = vlans->id[0];
+	
+	for (c = VLAN_ASCII_MAX; c > 0; c--) {
+		buf[i--] = (inner_vlan % 10) + '0';
+		inner_vlan /= 10;
+		if (inner_vlan == 0) {
+			break;
+		}
+	}
+	
+	buf[i--] = '.';
+	
+	for (c = VLAN_ASCII_MAX; c > 0; c--) {
+		buf[i--] = (outer_vlan % 10) + '0';
+		outer_vlan /= 10;
+		if (outer_vlan == 0) {
+			break;
+		}
+	}
+	
+
+	buf[i--] = '.';
+	
+	for (c = IF_NAMESIZE - 1; c >= 0; c--) {
+
+		if (dev[c] != 0) {
+			buf[i--] = dev[c];
+		}
+		
+		if (i < 0) {
+			break;
+		}
+
+	}
+
+	if(sizeof(option.circuit_id.val) == sizeof(buf)) {
+		memcpy(option.circuit_id.val, buf, sizeof(buf));
+	}
+	
+	/* Initialize remote ID */
+	memset(option.remote_id.val, 0, sizeof(option.remote_id.val));
 	option.remote_id.option_id = RAI_REMOTE_ID;
-	option.remote_id.len = IF_NAMESIZE;
-	//option.remote_id.val = bpf_ntohs(vlans->id[1]);
+	option.remote_id.len = sizeof(option.remote_id.val);
 	
 	return xdp_store_bytes(ctx, offset, &option, sizeof (option), 0);
 }
@@ -131,7 +185,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 		bpf_printk("Cannot tail extend packet, delta %i - error code %i", delta, res);
 		return XDP_ABORTED;
 	}
-	
+
 	bpf_printk("Tail extended packet by %i bytes", delta);
 
 	void *data_end = (void *) (long) ctx->data_end;
@@ -207,10 +261,10 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 
 	/* Increase IP length header */
 	ip->tot_len += bpf_htons(delta);
-	
+
 	/* Increase UDP length header */
 	udp->len += bpf_htons(delta);
-	
+
 	/* Read DHCP server IP from config map */
 	key = 0;
 	dhcp_srv_ip = bpf_map_lookup_elem(&relay_config, &key);
@@ -228,7 +282,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 	relay_hwaddr = bpf_map_lookup_elem(&relay_config, &key);
 	if (relay_hwaddr == NULL)
 		goto out;
-	
+
 	/* Read device name from device map */
 	key = 0;
 	dev = bpf_map_lookup_elem(&device_name, &key);
@@ -282,13 +336,13 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 
 		bpf_printk("Broadcast packet received, opcode %i, hops %i", dhcp->op, dhcp->hops);
 
-		// Set destination MAC
+		/* Set destination MAC */
 		memcpy(eth->h_dest, relay_hwaddr, ETH_ALEN);
 
 		// Set source MAC
 		//memcpy(eth->h_source, relay_hwaddr, ETH_ALEN);
 
-		// Set GIADDR
+		/* Set GIADDR */
 		if (&dhcp->giaddr.s_addr + sizeof (relay_agent_ip) > data_end) {
 			rc = XDP_ABORTED;
 			goto out;
@@ -386,7 +440,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 				bpf_printk("Could not write DHCP option 255 at offset %i", option_offset);
 				return XDP_ABORTED;
 			}
-			
+
 			bpf_printk("Wrote DHCP option 255 at offset %i, returning XDP_PASS", option_offset);
 
 			break;

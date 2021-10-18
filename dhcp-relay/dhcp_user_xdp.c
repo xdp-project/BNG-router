@@ -95,6 +95,57 @@ int xdp_link_attach(int ifindex, __u32 xdp_flags, int prog_fd) {
  */
 int main(int argc, char **argv) {
 
+	/*char device[500] = "ens6f0np0";
+	char o82[30] = { 0 };
+	
+	int outer_vlan = 80;
+	int inner_vlan = 25;
+
+	char str[30] = {0}; // large enough for an int even on 64-bit
+	int i = 30;
+	int c = 0;
+
+	for(c = 4; c > 0; c--) {
+		str[i--] = (inner_vlan % 10) + '0';
+		inner_vlan /= 10;
+		if(inner_vlan == 0) {
+			break;
+		}
+	}
+	
+	str[i--] = '.';
+	
+	for(c = 4; c > 0; c--) {
+		str[i--] = (outer_vlan % 10) + '0';
+		outer_vlan /= 10;
+		if(outer_vlan == 0) {
+			break;
+		}
+	}
+	
+	str[i--] = '.';
+	
+	int y;
+	for(y = sizeof(device) - 1; y >= 0; y--) {
+		if(device[y] != 0) {
+			str[i] = device[y];
+			i--;
+		}
+	}
+	
+	printf("i is %i\n", i);
+	
+	memset(o82, 0, 30);
+	memcpy(o82, str + i + 1, 30 - i);
+	
+	printf("The number was: %s\n", str + i + 1);
+
+	printf("Option 82: %s\n", o82);
+	
+	printf("Option 82 length was %i\n", 30 - i);
+	
+	return 0;*/
+
 	char filename[256] = "dhcp_kern_xdp.o";
 	int prog_fd, err;
 	int opt;
@@ -198,10 +249,10 @@ int main(int argc, char **argv) {
 
 	__u64 hwaddr = 0;
 	memcpy(&hwaddr, (unsigned char *) ifr.ifr_hwaddr.sa_data, 6);
-	
+
 	//display mac address
 	printf("Using device %s MAC: %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", dev, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-	
+
 	/* Load the BPF-ELF object file and get back first BPF_prog FD */
 	err = bpf_prog_load(filename, BPF_PROG_TYPE_XDP, &obj, &prog_fd);
 	if (err) {
@@ -248,7 +299,7 @@ int main(int argc, char **argv) {
 			XDP_OBJ);
 		exit(-1);
 	}
-	
+
 	// Set relay agent MAC address
 	key = 2;
 	err = bpf_map_update_elem(map_fd, &key, &hwaddr, BPF_ANY);
@@ -258,7 +309,7 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
-	
+
 	/* read the map from prog object file and update the real
 	 * server IP to the map
 	 */
@@ -284,7 +335,7 @@ int main(int argc, char **argv) {
 			XDP_OBJ);
 		exit(-1);
 	}
-	
+
 	err = xdp_link_attach(ifindex, xdp_flags, prog_fd);
 	if (err)
 		return err;
