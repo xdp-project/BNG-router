@@ -10,7 +10,7 @@
 #define DHO_DHCP_AGENT_OPTIONS 82
 #define RAI_CIRCUIT_ID 1
 #define RAI_REMOTE_ID 2
-#define RAI_OPTION_LEN 40
+#define RAI_OPTION_LEN IF_NAMESIZE
 #define VLAN_ASCII_MAX 4  /* Max bytes needed to store VLAN in ASCII format */
 
 #define DHCP_SERVER_PORT 67
@@ -22,7 +22,7 @@
 struct sub_option {
 	__u8 option_id;
 	__u8 len;
-	char val[IF_NAMESIZE];
+	char val[RAI_OPTION_LEN];
 };
 
 /*structure for dhcp option 82 */

@@ -8,6 +8,13 @@
 #include <xdp/context_helpers.h>
 #include "dhcp-relay.h"
 
+#define bpf_printk(fmt, ...)                                    \
+({                                                              \
+        char ____fmt[] = fmt;                                   \
+        bpf_trace_printk(____fmt, sizeof(____fmt),              \
+                         ##__VA_ARGS__);                        \
+})
+
 /*
  * This map is for storing the DHCP relay configuration, including:
  * 
@@ -49,35 +56,63 @@ struct {
 	__uint(max_entries, 16384);
 } client_vlans SEC(".maps");
 
+void memcpy_var(void *to, void *from, __u64 len) {
+	__u8 *t8 = to, *f8 = from;
+	int i;
+
+	for (i = 0; i < len; i++) {
+		*t8++ = *f8++;		
+	}
+		
+}
+
+void memset_var(void *d, __u8 c, __u64 len) {
+	__u8 *d8 = d;
+	int i;
+
+	for (i = 0; i < len; i++) {
+		*d8++ = c;
+	}
+		
+}
+
 /* Inserts DHCP option 82 into the received DHCP packet
  * at the specified offset.
  */
 static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 	struct collect_vlans *vlans, char *dev) {
+	
 	struct dhcp_option_82 option;
-
+	
 	option.t = DHO_DHCP_AGENT_OPTIONS;
 	option.len = sizeof (struct sub_option) + sizeof (struct sub_option);
 	option.circuit_id.option_id = RAI_CIRCUIT_ID;
-	option.circuit_id.len = sizeof(option.circuit_id.val);
+	option.circuit_id.len = sizeof (option.circuit_id.val);
+	option.remote_id.option_id = RAI_REMOTE_ID;
+	option.remote_id.len = sizeof (option.remote_id.val);
+
+	/* Initialize val arrays */
+	memset_var(option.circuit_id.val, 0, sizeof (option.circuit_id.val));
+	memset_var(option.remote_id.val, '*', sizeof (option.remote_id.val));
+	//memset(option.circuit_id.val, 0, sizeof (option.circuit_id.val));
+	//memset(option.remote_id.val, '*', sizeof (option.remote_id.val));
 	
 	/* Reconstruct VLAN device name
 	 * Convert VLAN tags to ASCII from right to left, starting with
 	 * inner VLAN tag.
-	 * Device name is 16 characters long and prepended with dash, e.g.:
-	 * ----ens6f0.83.20
-	 * We avoid null bytes to ensure compatibility with DHCP servers that
-	 * interpret null as a string terminator.
+	 * Device name is up to 16 characters long - remaining buffer space
+	 * contains null bytes.
 	 */
-	 
-	char buf[IF_NAMESIZE];
-	memset(buf, '-', sizeof (buf));
+
+	char buf[RAI_OPTION_LEN];
+	memset(buf, 0, sizeof (buf));
 	
-	int c = VLAN_ASCII_MAX;		/* We will need 4 bytes at most */
-	int i = IF_NAMESIZE - 1;
+	int c = VLAN_ASCII_MAX; /* We will need 4 bytes at most */
+	int i = RAI_OPTION_LEN - 1;
 	__u16 inner_vlan = vlans->id[1];
 	__u16 outer_vlan = vlans->id[0];
-	
+
+	/* Convert inner VLAN to ASCII */
 	for (c = VLAN_ASCII_MAX; c > 0; c--) {
 		buf[i--] = (inner_vlan % 10) + '0';
 		inner_vlan /= 10;
@@ -85,9 +120,10 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 			break;
 		}
 	}
-	
+
 	buf[i--] = '.';
-	
+
+	/* Convert outer VLAN to ASCII */
 	for (c = VLAN_ASCII_MAX; c > 0; c--) {
 		buf[i--] = (outer_vlan % 10) + '0';
 		outer_vlan /= 10;
@@ -95,31 +131,25 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 			break;
 		}
 	}
-	
+
 
 	buf[i--] = '.';
-	
-	for (c = IF_NAMESIZE - 1; c >= 0; c--) {
 
-		if (dev[c] != 0) {
+	/* Append interface name */
+	for (c = RAI_OPTION_LEN - 1; c >= 0; c--) {
+		if (dev[c] != 0)
 			buf[i--] = dev[c];
-		}
-		
-		if (i < 0) {
-			break;
-		}
-
-	}
-
-	if(sizeof(option.circuit_id.val) == sizeof(buf)) {
-		memcpy(option.circuit_id.val, buf, sizeof(buf));
+		if (i < 0)
+			break;	
 	}
 	
-	/* Initialize remote ID */
-	memset(option.remote_id.val, 0, sizeof(option.remote_id.val));
-	option.remote_id.option_id = RAI_REMOTE_ID;
-	option.remote_id.len = sizeof(option.remote_id.val);
+	i++;
 	
+	/* Copy resulting interface name to circuit_id */
+	if (sizeof (option.circuit_id.val) == sizeof (buf)) {
+		memcpy_var(option.circuit_id.val, buf + i, sizeof (buf) - i);
+	}
+
 	return xdp_store_bytes(ctx, offset, &option, sizeof (option), 0);
 }
 
@@ -165,13 +195,6 @@ static __always_inline int calc_ip_csum(struct iphdr *oldip, struct iphdr *ip,
  * unaligned stack accesses
  */
 //static __u8 buf[static_offset + VLAN_MAX_DEPTH * sizeof (struct vlan_hdr)];
-
-#define bpf_printk(fmt, ...)                                    \
-({                                                              \
-        char ____fmt[] = fmt;                                   \
-        bpf_trace_printk(____fmt, sizeof(____fmt),              \
-                         ##__VA_ARGS__);                        \
-})
 
 /* XDP program for parsing the DHCP packet and inserting the option 82*/
 SEC(XDP_PROG_SEC)
