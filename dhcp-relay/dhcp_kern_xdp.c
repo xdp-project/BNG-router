@@ -60,7 +60,7 @@ void memcpy_var(void *to, void *from, __u64 len) {
 	__u8 *t8 = to, *f8 = from;
 	int i;
 
-	for (i = 0; i < len; i++) {
+	for (i = 0; i < len && i < MAX_LOOPS; i++) {
 		*t8++ = *f8++;		
 	}
 		
@@ -70,7 +70,7 @@ void memset_var(void *d, __u8 c, __u64 len) {
 	__u8 *d8 = d;
 	int i;
 
-	for (i = 0; i < len; i++) {
+	for (i = 0; i < len && i < MAX_LOOPS; i++) {
 		*d8++ = c;
 	}
 		
@@ -83,6 +83,8 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 	struct collect_vlans *vlans, char *dev) {
 	
 	struct dhcp_option_82 option;
+	
+	static __u8 buf[RAI_OPTION_LEN];
 	
 	option.t = DHO_DHCP_AGENT_OPTIONS;
 	option.len = sizeof (struct sub_option) + sizeof (struct sub_option);
@@ -104,15 +106,16 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 	 * contains null bytes.
 	 */
 
-	char buf[RAI_OPTION_LEN];
 	memset(buf, 0, sizeof (buf));
 	
 	int c = VLAN_ASCII_MAX; /* We will need 4 bytes at most */
 	int i = RAI_OPTION_LEN - 1;
+	
 	__u16 inner_vlan = vlans->id[1];
 	__u16 outer_vlan = vlans->id[0];
 
 	/* Convert inner VLAN to ASCII */
+#pragma unroll VLAN_ASCII_MAX
 	for (c = VLAN_ASCII_MAX; c > 0; c--) {
 		buf[i--] = (inner_vlan % 10) + '0';
 		inner_vlan /= 10;
@@ -124,6 +127,7 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 	buf[i--] = '.';
 
 	/* Convert outer VLAN to ASCII */
+#pragma unroll VLAN_ASCII_MAX	
 	for (c = VLAN_ASCII_MAX; c > 0; c--) {
 		buf[i--] = (outer_vlan % 10) + '0';
 		outer_vlan /= 10;
@@ -132,10 +136,10 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 		}
 	}
 
-
 	buf[i--] = '.';
 
 	/* Append interface name */
+#pragma unroll RAI_OPTION_LEN
 	for (c = RAI_OPTION_LEN - 1; c >= 0; c--) {
 		if (dev[c] != 0)
 			buf[i--] = dev[c];
@@ -148,8 +152,9 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 	/* Copy resulting interface name to circuit_id */
 	if (sizeof (option.circuit_id.val) == sizeof (buf)) {
 		memcpy_var(option.circuit_id.val, buf + i, sizeof (buf) - i);
+		//memcpy_var(option.circuit_id.val, buf, sizeof (buf));
 	}
-
+	
 	return xdp_store_bytes(ctx, offset, &option, sizeof (option), 0);
 }
 
@@ -206,10 +211,10 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 	int res = bpf_xdp_adjust_tail(ctx, delta);
 	if (res != 0) {
 		bpf_printk("Cannot tail extend packet, delta %i - error code %i", delta, res);
-		return XDP_ABORTED;
+		return XDP_PASS;
 	}
 
-	bpf_printk("Tail extended packet by %i bytes", delta);
+	//bpf_printk("Tail extended packet by %i bytes", delta);
 
 	void *data_end = (void *) (long) ctx->data_end;
 	void *data = (void *) (long) ctx->data;
@@ -240,27 +245,34 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 	int key = 0;
 	int len = 0;
 
-	if (data + 1 > data_end)
-		return XDP_ABORTED;
+	if (data + 1 > data_end) {
+		bpf_printk("Empty packet\n");
+		goto out;
+	}
 
 	nh.pos = data;
 	ether_type = parse_ethhdr_vlan(&nh, data_end, &eth, &vlans);
 	/* check for valid ether type */
 	if (ether_type < 0) {
-		bpf_printk("Cannot determine ethertype");
-		rc = XDP_ABORTED;
+		bpf_printk("Cannot determine ethertype\n");
 		goto out;
 	}
+	
 	if (ether_type != bpf_htons(ETH_P_IP)) {
-		bpf_printk("Ethertype %#x is not ETH_P_IP", bpf_ntohs(ether_type));
+		//bpf_printk("Ethertype %x is not ETH_P_IP\n", bpf_ntohs(ether_type));
 		goto out;
 	}
 
-	bpf_printk("Ethertype %x", bpf_ntohs(ether_type));
-
+	bpf_printk("Ethertype %x\n", bpf_ntohs(ether_type));
+	
 	/* Check at least two vlan tags are present */
+	if (vlans.id[0] == 0) {
+		bpf_printk("No outer VLAN tag set\n");
+		goto out;
+	}
+	
 	if (vlans.id[1] == 0) {
-		bpf_printk("No VLAN tags set");
+		bpf_printk("No inner VLAN tag set\n");
 		goto out;
 	}
 
@@ -287,6 +299,8 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 
 	/* Increase UDP length header */
 	udp->len += bpf_htons(delta);
+	
+	udp->check = 0;
 
 	/* Read DHCP server IP from config map */
 	key = 0;
@@ -317,6 +331,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 	//	goto out;
 
 	/* Increment offset by 4 bytes for each VLAN (to accomodate VLAN headers */
+#pragma unroll VLAN_MAX_DEPTH
 	for (i = 0; i < VLAN_MAX_DEPTH; i++) {
 		if (vlans.id[i]) {
 
@@ -449,7 +464,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 				bpf_printk("Could not write DHCP option 82 at offset %i", option_offset);
 				return XDP_ABORTED;
 			}
-
+			
 			/* Set END option */
 
 			/* Verifier check */

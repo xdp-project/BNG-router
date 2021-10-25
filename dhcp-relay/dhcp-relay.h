@@ -18,6 +18,8 @@
 #define DHCP_REQUEST 1
 #define DHCP_REPLY 2
 
+#define MAX_LOOPS 40
+
 /* Structure for sub-options in option 82 */
 struct sub_option {
 	__u8 option_id;
