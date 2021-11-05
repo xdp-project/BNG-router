@@ -18,7 +18,10 @@
 #define DHCP_REQUEST 1
 #define DHCP_REPLY 2
 
-#define MAX_LOOPS 40
+#define MAX_LOOPS 20
+#define U16_ASCII_LEN 5	/* Max value: 65535 */
+
+#define IP_ADDR_BCAST 0xFFFFFFFF	/* 255.255.255.255 in hex */
 
 /* Structure for sub-options in option 82 */
 struct sub_option {
