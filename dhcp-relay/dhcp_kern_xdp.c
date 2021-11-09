@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <net/if.h>    /* IF_NAMESIZE */
 #include <linux/bpf.h>
 #include <linux/in.h>
-#include <net/if.h>    /* IF_NAMESIZE */
 #include <bpf/bpf_helpers.h>
 #include <xdp/parsing_helpers.h>
 #include <xdp/context_helpers.h>
@@ -56,80 +56,107 @@ struct {
 	__uint(max_entries, 16384);
 } client_vlans SEC(".maps");
 
-static int memcpy_var(void *to, void *from, __u8 len) {
-	__u8 *t8 = to, *f8 = from;
-	int i;
+//static int memcpy_var(void *to, void *from, __u8 len) {
+//	__u8 *t8 = to, *f8 = from;
+//	int i;
+//
+//	if (len > RAI_OPTION_LEN) {
+//		return -1;
+//	}
+//
+//	for (i = 0; i < len; i++) {
+//
+//		if (i > RAI_OPTION_LEN) {
+//			return -1;
+//		}
+//
+//		*t8++ = *f8++;
+//
+//	}
+//
+//
+//	if (i == RAI_OPTION_LEN)
+//		return -1;
+//
+//	return 0;
+//
+//}
 
-	if (len > MAX_LOOPS) {
+int u16_to_ascii(struct sub_option *opt, __u8 offset, __u16 num) {
+
+	if (opt == NULL)
 		return -1;
-	}
 
-	for (i = 0; i < len; i++) {
-
-		if (i > MAX_LOOPS) {
-			return -1;
-		}
-
-		*t8++ = *f8++;
-
-	}
-
-
-	if (i == MAX_LOOPS)
+	if (offset > RAI_OPTION_LEN)
 		return -1;
 
-	return 0;
-
-}
-
-static int u16_to_ascii(char *buf, __u8 offset, __u16 num) {
+	if (offset < U16_ASCII_LEN)
+		return -1;
 
 	__u8 i;
-#pragma unroll U16_ASCII_LEN
-	for (i = offset; i > 0; i--) {
+	//#pragma unroll U16_ASCII_LEN
+	for (i = offset - 1; i > 0; i--) {
 
-		buf[i - 1] = (num % 10) + '0';
+		if (i == 0)
+			break;
+
+		opt->val[i] = (__u8) (num % 10) + '0';
 		num /= 10;
 		if (num == 0)
 			break;
 
 	}
 
-	if (i > 1) {
-		i--;
-		buf[i - 1] = '.';
+	if (i > 0) {
+		opt->val[--i] = '.';
 	}
 
-	return i - 1;
+	if (i > RAI_OPTION_LEN)
+		return -1;
+
+	return i;
 
 }
 
-static int str_len(char *buf) {
+int str_len(struct dev_name *dev) {
+
+	if (dev == NULL)
+		return -1;
 
 	__u8 i = 0;
-	for (i = 0; i < IF_NAMESIZE; i++)
-		if (buf[i] == 0)
+	for (i = 0; i < RAI_OPTION_LEN; i++)
+		if (dev->name[i] == 0)
 			break;
 
 	return i;
 
 }
 
-static int copy_dev_name(char *buf, __u8 offset, char dev[IF_NAMESIZE]) {
+int copy_dev_name(struct sub_option *dest, __u8 offset, struct dev_name *dev) {
 
-	__u8 dev_len = 0;
-
-	dev_len = str_len(dev);
-	
-	/* Check if we have enough space in buffer */
-	if ((offset - dev_len) < 0) {
+	if (dest == NULL)
 		return -1;
+
+	if (dev == NULL)
+		return -1;
+
+	__u8 i;
+
+	/* Copy device name and left-align VLAN part*/
+#pragma unroll RAI_OPTION_LEN
+	for (i = 0; i < RAI_OPTION_LEN; i++) {
+
+		if (i < dev->len) {
+			/* Copy device name */
+			dest->val[i] = dev->name[i];
+		} else if (offset < RAI_OPTION_LEN) {
+			/* Move VLAN part (all bytes from offset and up) */
+			dest->val[i] = dest->val[offset];
+			dest->val[offset++] = 0;
+		}
+
 	}
-	
-	offset -= dev_len;
-	
-	memcpy_var(buf + offset, dev, dev_len);
-	
+
 	return offset;
 }
 
@@ -137,11 +164,9 @@ static int copy_dev_name(char *buf, __u8 offset, char dev[IF_NAMESIZE]) {
  * at the specified offset.
  */
 static __always_inline int write_dhcp_option_82(void *ctx, int offset,
-		struct collect_vlans *vlans, char dev[IF_NAMESIZE]) {
+		struct collect_vlans *vlans, struct dev_name dev) {
 
 	struct dhcp_option_82 option = {0};
-
-	static __u8 buf[RAI_OPTION_LEN] = {0};
 
 	option.t = DHO_DHCP_AGENT_OPTIONS;
 	option.len = sizeof (struct sub_option) + sizeof (struct sub_option);
@@ -159,19 +184,13 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 
 	int i = RAI_OPTION_LEN;
 
-	// Start with interface name
-	/*int dev_len = str_len(dev, IF_NAMESIZE);
-	if (dev_len < sizeof (option.circuit_id.val)) {
-		memcpy_var(option.circuit_id.val, dev, dev_len);
-	}*/
-
 	__u16 inner_vlan = vlans->id[1];
 	__u16 outer_vlan = vlans->id[0];
 
 	if (inner_vlan != 0) {
 
 		/* Convert inner VLAN to ASCII */
-		i = u16_to_ascii(buf, RAI_OPTION_LEN, inner_vlan);
+		i = u16_to_ascii(&option.circuit_id, RAI_OPTION_LEN, inner_vlan);
 		if (i < 0) {
 			return -1;
 		}
@@ -181,24 +200,17 @@ static __always_inline int write_dhcp_option_82(void *ctx, int offset,
 	if (outer_vlan != 0) {
 
 		/* Convert outer VLAN to ASCII */
-		i = u16_to_ascii(buf, i, outer_vlan);
+		i = u16_to_ascii(&option.circuit_id, i, outer_vlan);
 		if (i < 0) {
 			return -1;
 		}
 
 	}
 
-// FIXME: Verifier complains about BPF program being too large when this
-// function is enabled
-//	i = copy_dev_name(buf, i, dev);
-//	if (i < 0)
-//		return -1;
-
-	if (sizeof (option.circuit_id.val) == sizeof (buf)) {
-		
-		/* Copy right-aligned VLAN text to left-aligned buffer */
-		memcpy_var(option.circuit_id.val, buf + i, sizeof (buf) - i);
-	}
+	/* Insert device name and left-align circuit ID */
+	i = copy_dev_name(&option.circuit_id, i, &dev);
+	if (i < 0)
+		return -1;
 
 	return xdp_store_bytes(ctx, offset, &option, sizeof (option), 0);
 }
@@ -267,6 +279,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 	struct iphdr oldip;
 	struct udphdr *udp;
 	struct dhcp_packet *dhcp;
+	struct dev_name dev = {0};
 	__u32 *dhcp_srv_ip;
 	__u32 *relay_agent_ip;
 	__u64 *relay_hwaddr;
@@ -278,7 +291,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 	__u8 option_code = 0;
 	__u8 option_length = 0;
 	__u64 client_mac = 0;
-	char *dev;
+	char *dev_config;
 	__u8 i = 0;
 	__u8 head_adjusted = 0;
 
@@ -295,9 +308,9 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 
 	nh.pos = data;
 	ether_type = parse_ethhdr_vlan(&nh, data_end, &eth, &vlans);
-	/* check for valid ether type */
+	/* Check for valid EtherType */
 	if (ether_type < 0) {
-		bpf_printk("Cannot determine ethertype");
+		bpf_printk("Cannot determine EtherType");
 		goto out;
 	}
 
@@ -314,7 +327,6 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 
 	if (vlans.id[1] == 0) {
 		bpf_printk("No inner VLAN tag set");
-		//goto out;
 	}
 
 	h_proto = parse_iphdr(&nh, data_end, &ip);
@@ -366,12 +378,12 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 
 	/* Read device name from device map */
 	key = 0;
-	dev = bpf_map_lookup_elem(&device_name, &key);
-	if (dev == NULL)
+	dev_config = bpf_map_lookup_elem(&device_name, &key);
+	if (dev_config == NULL)
 		goto out;
 
-	//memcpy(dev_name, dev, IF_NAMESIZE);
-	//dev_len = str_len(dev_name, IF_NAMESIZE);
+	memcpy(dev.name, dev_config, RAI_OPTION_LEN);
+	dev.len = str_len(&dev);
 
 	/* Increment offset by 4 bytes for each VLAN (to accomodate VLAN headers */
 #pragma unroll VLAN_MAX_DEPTH
@@ -513,7 +525,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 				rc = XDP_ABORTED;
 				goto out;
 			}
-			
+
 			/* Move MAC address headers + outer VLAN tag to beginning of packet */
 			memmove(data, data + sizeof (struct vlan_hdr), ETH_ALEN + ETH_ALEN + sizeof (struct vlan_hdr));
 
@@ -552,10 +564,12 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 
 	option_offset = offset;
 
+	__u8 n = 0;
+
 	__u8 *pos = (__u8 *) (data + option_offset);
 
 	/* Loop through all DHCP options */
-#pragma unroll DHCP_MAX_OPTIONS
+	//#pragma unroll DHCP_MAX_OPTIONS
 	for (i = 0; i < DHCP_MAX_OPTIONS; i++) {
 
 		/* Verifier check */
@@ -571,9 +585,26 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 
 			bpf_printk("Will erase DHCP option 82");
 
-			/* FIXME: Erase options 82 + 255 and set new option 255 */
-
+			/* Set new option 255 */
 			*pos = 255;
+
+			/* Increment pointer 2nd byte of option 82 */
+			pos++;
+
+			/* Verifier check */
+			if (pos + 1 > data_end)
+				break;
+
+			/* Erase remainder of option 82 */
+			for (n = 0; n < sizeof (struct dhcp_option_82); n++) {
+
+				if (pos + 1 > data_end)
+					break;
+
+				*pos++ = 0;
+
+			}
+
 			break;
 
 		}

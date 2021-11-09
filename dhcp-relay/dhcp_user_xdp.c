@@ -89,62 +89,7 @@ int xdp_link_attach(int ifindex, __u32 xdp_flags, int prog_fd) {
 	return 0;
 }
 
-/* User program takes two  or three arguments
- * interface name, relay server IP and prog
- * unload flag
- */
 int main(int argc, char **argv) {
-
-	/*char device[500] = "ens6f0np0";
-	char o82[30] = { 0 };
-	
-	int outer_vlan = 80;
-	int inner_vlan = 25;
-
-	char str[30] = {0}; // large enough for an int even on 64-bit
-	int i = 30;
-	int c = 0;
-
-	for(c = 4; c > 0; c--) {
-		str[i--] = (inner_vlan % 10) + '0';
-		inner_vlan /= 10;
-		if(inner_vlan == 0) {
-			break;
-		}
-	}
-	
-	str[i--] = '.';
-	
-	for(c = 4; c > 0; c--) {
-		str[i--] = (outer_vlan % 10) + '0';
-		outer_vlan /= 10;
-		if(outer_vlan == 0) {
-			break;
-		}
-	}
-	
-	str[i--] = '.';
-	
-	int y;
-	for(y = sizeof(device) - 1; y >= 0; y--) {
-		if(device[y] != 0) {
-			str[i] = device[y];
-			i--;
-		}
-	}
-	
-	printf("i is %i\n", i);
-	
-	memset(o82, 0, 30);
-	memcpy(o82, str + i + 1, 30 - i);
-	
-	printf("The number was: %s\n", str + i + 1);
-
-	printf("Option 82: %s\n", o82);
-	
-	printf("Option 82 length was %i\n", 30 - i);
-	
-	return 0;*/
 
 	char filename[256] = "dhcp_kern_xdp.o";
 	int prog_fd, err;
@@ -171,7 +116,7 @@ int main(int argc, char **argv) {
 	while ((opt = getopt_long(argc, argv, "hui:d:m:s:", options, NULL)) !=
 		-1) {
 		switch (opt) {
-			case 'i':
+			case 'i':	/* Physical interface */
 				strncpy(dev, optarg, IF_NAMESIZE);
 				dev[IF_NAMESIZE - 1] = '\0';
 				ifindex = if_nametoindex(dev);
@@ -180,7 +125,7 @@ int main(int argc, char **argv) {
 					return -EINVAL;
 				}
 				break;
-			case 'd': // DHCP server address
+			case 'd':	/* DHCP server address */
 				if (inet_aton(optarg, &dhcp_server_addr) == 0) {
 					fprintf(stderr,
 						"Couldn't validate DHCP server IP address:%s\n",
@@ -189,7 +134,7 @@ int main(int argc, char **argv) {
 				}
 				dhcp_server_addr_set = true;
 				break;
-			case 's': // Relay agent address
+			case 's':	/* Relay agent address */
 				if (inet_aton(optarg, &relay_agent_addr) == 0) {
 					fprintf(stderr,
 						"Couldn't validate relay agent IP address:%s\n",
@@ -198,7 +143,7 @@ int main(int argc, char **argv) {
 				}
 				relay_agent_addr_set = true;
 				break;
-			case 'm':
+			case 'm':	/* Mode: skb or native */
 				if (strcmp(optarg, "skb") == 0) {
 					xdp_flags = XDP_FLAGS_SKB_MODE;
 				} else if (strcmp(optarg, "drv") != 0) {
@@ -207,10 +152,10 @@ int main(int argc, char **argv) {
 				}
 
 				break;
-			case 'u':
+			case 'u':	/* Unload XDP program */
 				do_unload = 1;
 				break;
-			case 'h':
+			case 'h':	/* Help menu */
 				print_usage(argv);
 				exit(0);
 			default:
@@ -235,7 +180,7 @@ int main(int argc, char **argv) {
 	if (do_unload)
 		return xdp_link_detach(ifindex, xdp_flags);
 
-	// Find MAC address of interface
+	/* Find MAC address of interface */
 	fd = socket(AF_INET, SOCK_DGRAM, 0);
 
 	ifr.ifr_addr.sa_family = AF_INET;
@@ -250,7 +195,7 @@ int main(int argc, char **argv) {
 	__u64 hwaddr = 0;
 	memcpy(&hwaddr, (unsigned char *) ifr.ifr_hwaddr.sa_data, 6);
 
-	//display mac address
+	/* Display MAC address */
 	printf("Using device %s MAC: %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n", dev, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
 	/* Load the BPF-ELF object file and get back first BPF_prog FD */
@@ -265,9 +210,7 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
-	/* read the map from prog object file and update the real
-	 * server IP to the map
-	 */
+	/* Open server config map */
 	map = bpf_object__find_map_by_name(obj, SERVER_MAP);
 	err = libbpf_get_error(map);
 	if (err) {
@@ -282,7 +225,7 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
-	// Set DHCP server address
+	/* Set DHCP server address */
 	key = 0;
 	err = bpf_map_update_elem(map_fd, &key, &dhcp_server_addr.s_addr, BPF_ANY);
 	if (err) {
@@ -291,7 +234,7 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
-	// Set relay agent IP address
+	/* Set relay agent IP address */
 	key = 1;
 	err = bpf_map_update_elem(map_fd, &key, &relay_agent_addr.s_addr, BPF_ANY);
 	if (err) {
@@ -300,7 +243,7 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
-	// Set relay agent MAC address
+	/* Set relay agent MAC address */
 	key = 2;
 	err = bpf_map_update_elem(map_fd, &key, &hwaddr, BPF_ANY);
 	if (err) {
@@ -310,9 +253,7 @@ int main(int argc, char **argv) {
 	}
 
 
-	/* read the map from prog object file and update the real
-	 * server IP to the map
-	 */
+	/* Open device map */
 	device_map = bpf_object__find_map_by_name(obj, DEVICE_MAP);
 	err = libbpf_get_error(device_map);
 	if (err) {
@@ -327,7 +268,7 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
-	// Set device name in map
+	/* Set device name in map */
 	key = 0;
 	err = bpf_map_update_elem(device_map_fd, &key, dev, BPF_ANY);
 	if (err) {
@@ -336,6 +277,7 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
+	/* Attach XDP program to interface */
 	err = xdp_link_attach(ifindex, xdp_flags, prog_fd);
 	if (err)
 		return err;

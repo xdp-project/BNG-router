@@ -43,6 +43,11 @@ struct dhcp_option_255 {
 	__u8 t;
 };
 
+struct dev_name {
+	char name[IF_NAMESIZE];
+	__u8 len;
+};
+
 struct dhcp_packet {
 	__u8 op; /* 0: Message opcode/type */
 	__u8 htype; /* 1: Hardware addr type (net/if_types.h) */
