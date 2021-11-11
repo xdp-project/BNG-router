@@ -1,3 +1,4 @@
+#! /bin/python
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import yaml
@@ -32,9 +33,8 @@ for iface in config["interfaces"]:
                 link=base_iface,
                 vlan_id=inner_vlan_tag,
             )
-        except pr2modules.netlink.exceptions.NetlinkError:
-            pass
-
+        except pr2modules.netlink.exceptions.NetlinkError as error:
+            print (error)
         # TODO: Check for existing inner tagged iface
         # TODO: Check if the base iface exists
         outer_vlan_iface = f"{if_name}.{inner_vlan_tag}.{outer_vlan_tag}"
@@ -51,14 +51,22 @@ for iface in config["interfaces"]:
             if ip_addr.version == 4:
                 mask = ip_addr.network.prefixlen
                 ip_str = ip_addr.ip.compressed
-
                 ip.addr(
                     "add",
-                    index=ip.link_lookup(outer_vlan_iface)[0],
+                    index=ip.link_lookup(ifname=outer_vlan_iface)[0],
                     address=ip_str,
                     mask=mask,
                 )
-# TODO: Handle ipv6
+            if ip_addr.version == 6:
+                mask = ip_addr.network.prefixlen
+                ip_str = ip_addr.ip.compressed
+
+                ip.addr(
+                    "add",
+                    index=ip.link_lookup(ifname=outer_vlan_iface)[0],
+                    address=ip_str,
+                    mask=mask,
+                )
 # TODO: Existing addresses
 
 

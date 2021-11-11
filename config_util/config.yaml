@@ -1,8 +1,9 @@
 interfaces:
-  - ifname: enp2s0
+  - ifname: enp6s0
     customers:
       - id: 100
         outer_vlan: 1000
         inner_vlan: 400
         ip_addresses:
           - 10.0.2.1/32
+          - 2a00::1/64
