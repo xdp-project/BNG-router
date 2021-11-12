@@ -10,7 +10,7 @@
 #define DHO_DHCP_AGENT_OPTIONS 82
 #define RAI_CIRCUIT_ID 1
 #define RAI_REMOTE_ID 2
-#define RAI_OPTION_LEN 40
+#define RAI_OPTION_LEN IF_NAMESIZE
 #define VLAN_ASCII_MAX 4  /* Max bytes needed to store VLAN in ASCII format */
 
 #define DHCP_SERVER_PORT 67
@@ -18,11 +18,16 @@
 #define DHCP_REQUEST 1
 #define DHCP_REPLY 2
 
+#define MAX_LOOPS 20
+#define U16_ASCII_LEN 5	/* Max value: 65535 */
+
+#define IP_ADDR_BCAST 0xFFFFFFFF	/* 255.255.255.255 in hex */
+
 /* Structure for sub-options in option 82 */
 struct sub_option {
 	__u8 option_id;
 	__u8 len;
-	char val[IF_NAMESIZE];
+	char val[RAI_OPTION_LEN];
 };
 
 /*structure for dhcp option 82 */
@@ -36,6 +41,10 @@ struct dhcp_option_82 {
 /*structure for dhcp option 255 */
 struct dhcp_option_255 {
 	__u8 t;
+};
+
+struct dev_name {
+	char name[IF_NAMESIZE];
 };
 
 struct dhcp_packet {
