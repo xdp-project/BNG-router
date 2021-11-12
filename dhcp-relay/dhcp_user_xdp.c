@@ -28,6 +28,7 @@ static const struct option options[] = {
 	{ "relay-agent-address", required_argument, NULL, 's'},
 	{ "mode", required_argument, NULL, 'm'},
 	{ "unload", no_argument, NULL, 'u'},
+	{ "verbose", no_argument, NULL, 'v'},
 	{ 0, 0, NULL, 0}
 };
 
@@ -89,6 +90,13 @@ int xdp_link_attach(int ifindex, __u32 xdp_flags, int prog_fd) {
 	return 0;
 }
 
+static int libbpf_print_func(enum libbpf_print_level level, const char *format,
+			     va_list args)
+{
+	return vfprintf(stderr, format, args);
+}
+
+
 int main(int argc, char **argv) {
 
 	char filename[256] = "dhcp_kern_xdp.o";
@@ -113,7 +121,7 @@ int main(int argc, char **argv) {
 	unsigned char *mac;
 	struct ifreq ifr;
 
-	while ((opt = getopt_long(argc, argv, "hui:d:m:s:", options, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "huvi:d:m:s:", options, NULL)) != -1) {
 		switch (opt) {
 		case 'i':	/* Physical interface */
 			strncpy(dev, optarg, IF_NAMESIZE);
@@ -153,6 +161,10 @@ int main(int argc, char **argv) {
 			break;
 		case 'u':	/* Unload XDP program */
 			do_unload = 1;
+			break;
+
+		case 'v':	/* Verbose libbpf logging */
+			libbpf_set_print(libbpf_print_func);
 			break;
 
 		case 'h':	/* Help menu */
