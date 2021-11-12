@@ -45,7 +45,6 @@ struct dhcp_option_255 {
 
 struct dev_name {
 	char name[IF_NAMESIZE];
-	__u8 len;
 };
 
 struct dhcp_packet {

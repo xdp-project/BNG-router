@@ -56,163 +56,93 @@ struct {
 	__uint(max_entries, 16384);
 } client_vlans SEC(".maps");
 
-//static int memcpy_var(void *to, void *from, __u8 len) {
-//	__u8 *t8 = to, *f8 = from;
-//	int i;
-//
-//	if (len > RAI_OPTION_LEN) {
-//		return -1;
-//	}
-//
-//	for (i = 0; i < len; i++) {
-//
-//		if (i > RAI_OPTION_LEN) {
-//			return -1;
-//		}
-//
-//		*t8++ = *f8++;
-//
-//	}
-//
-//
-//	if (i == RAI_OPTION_LEN)
-//		return -1;
-//
-//	return 0;
-//
-//}
+static int u16_to_ascii(struct dev_name *buf, __u8 end_offset, __u16 num) {
+	int i;
 
-int u16_to_ascii(struct sub_option *opt, __u8 offset, __u16 num) {
-
-	if (opt == NULL)
+	if (buf == NULL ||
+	    end_offset > sizeof(buf->name) ||
+	    end_offset < U16_ASCII_LEN)
 		return -1;
 
-	if (offset > RAI_OPTION_LEN)
-		return -1;
-
-	if (offset < U16_ASCII_LEN)
-		return -1;
-
-	__u8 i;
-	//#pragma unroll U16_ASCII_LEN
-	for (i = offset - 1; i > 0; i--) {
-
-		if (i == 0)
-			break;
-
-		opt->val[i] = (__u8) (num % 10) + '0';
+	for (i = end_offset - 1; i >= 0; i--) {
+		buf->name[i] = (__u8) (num % 10) + '0';
 		num /= 10;
-		if (num == 0)
+		if (!num)
 			break;
-
 	}
-
-	if (i > 0) {
-		opt->val[--i] = '.';
-	}
-
-	if (i > RAI_OPTION_LEN)
-		return -1;
 
 	return i;
-
 }
 
-int str_len(struct dev_name *dev) {
+static int copy_dev_name(struct sub_option *dest, __u8 wr_offset,
+			 struct dev_name *dev, __u8 rd_offset) {
+	int i;
 
-	if (dev == NULL)
+	if (dest == NULL || dev == NULL || wr_offset > sizeof(dest->val) - 1)
 		return -1;
 
-	__u8 i = 0;
-	for (i = 0; i < RAI_OPTION_LEN; i++)
-		if (dev->name[i] == 0)
+	for (i = 0; i < sizeof(dest->val) - wr_offset - 1; i++) {
+		if (i + rd_offset > sizeof(dev->name) - 1 ||
+		    !dev->name[i + rd_offset])
 			break;
 
-	return i;
-
-}
-
-int copy_dev_name(struct sub_option *dest, __u8 offset, struct dev_name *dev) {
-
-	if (dest == NULL)
-		return -1;
-
-	if (dev == NULL)
-		return -1;
-
-	__u8 i;
-
-	/* Copy device name and left-align VLAN part*/
-#pragma unroll RAI_OPTION_LEN
-	for (i = 0; i < RAI_OPTION_LEN; i++) {
-
-		if (i < dev->len) {
-			/* Copy device name */
-			dest->val[i] = dev->name[i];
-		} else if (offset < RAI_OPTION_LEN) {
-			/* Move VLAN part (all bytes from offset and up) */
-			dest->val[i] = dest->val[offset];
-			dest->val[offset++] = 0;
-		}
-
+		dest->val[i + wr_offset] = dev->name[i + rd_offset];
 	}
 
-	return offset;
+ 	return i;
 }
 
 /* Inserts DHCP option 82 into the received DHCP packet
  * at the specified offset.
  */
-static __always_inline int write_dhcp_option_82(void *ctx, int offset,
-		struct collect_vlans *vlans, struct dev_name dev) {
+int write_dhcp_option_82(struct xdp_md *ctx, int pkt_offset,
+			 struct collect_vlans *vlans, struct dev_name *dev) {
 
-	struct dhcp_option_82 option = {0};
+	__u16 inner_vlan, outer_vlan;
+	struct dev_name buf = {};
+	int len, vlan_offset;
+	struct dhcp_option_82 option = {
+		.t = DHO_DHCP_AGENT_OPTIONS,
+		.len = sizeof (struct sub_option) + sizeof (struct sub_option),
+		.circuit_id.option_id = RAI_CIRCUIT_ID,
+		.circuit_id.len = sizeof (option.circuit_id.val),
+		.remote_id.option_id = RAI_REMOTE_ID,
+		.remote_id.len = sizeof (option.remote_id.val)
+	};
 
-	option.t = DHO_DHCP_AGENT_OPTIONS;
-	option.len = sizeof (struct sub_option) + sizeof (struct sub_option);
-	option.circuit_id.option_id = RAI_CIRCUIT_ID;
-	option.circuit_id.len = sizeof (option.circuit_id.val);
-	option.remote_id.option_id = RAI_REMOTE_ID;
-	option.remote_id.len = sizeof (option.remote_id.val);
-
-	/* Reconstruct VLAN device name
-	 * Convert VLAN tags to ASCII from right to left, starting with
-	 * inner VLAN tag.
-	 * Device name is up to 16 characters long - remaining buffer space
-	 * contains null bytes.
-	 */
-
-	int i = RAI_OPTION_LEN;
-
-	__u16 inner_vlan = vlans->id[1];
-	__u16 outer_vlan = vlans->id[0];
-
-	if (inner_vlan != 0) {
-
-		/* Convert inner VLAN to ASCII */
-		i = u16_to_ascii(&option.circuit_id, RAI_OPTION_LEN, inner_vlan);
-		if (i < 0) {
-			return -1;
-		}
-
-	}
-
-	if (outer_vlan != 0) {
-
-		/* Convert outer VLAN to ASCII */
-		i = u16_to_ascii(&option.circuit_id, i, outer_vlan);
-		if (i < 0) {
-			return -1;
-		}
-
-	}
-
-	/* Insert device name and left-align circuit ID */
-	i = copy_dev_name(&option.circuit_id, i, &dev);
-	if (i < 0)
+	if (!ctx || !vlans || !dev)
 		return -1;
 
-	return xdp_store_bytes(ctx, offset, &option, sizeof (option), 0);
+	inner_vlan = vlans->id[1];
+	outer_vlan = vlans->id[0];
+
+	if (!inner_vlan || !outer_vlan)
+		return -1;
+
+	/* The u16_to_ascii function works backwards from the end of the buffer,
+	 * so start out at the end of the string.
+	 */
+	vlan_offset = sizeof(buf.name);
+
+	vlan_offset = u16_to_ascii(&buf, vlan_offset, inner_vlan);
+	if (vlan_offset < 0)
+		return vlan_offset;
+	buf.name[--vlan_offset] = '.';
+
+	vlan_offset = u16_to_ascii(&buf, vlan_offset, outer_vlan);
+	if (vlan_offset < 0)
+		return vlan_offset;
+	buf.name[--vlan_offset] = '.';
+
+	len = copy_dev_name(&option.circuit_id, 0, dev, 0);
+	if (len < 0)
+		return len;
+
+	len = copy_dev_name(&option.circuit_id, len, &buf, vlan_offset);
+	if (len < 0)
+		return len;
+
+	return xdp_store_bytes(ctx, pkt_offset, &option, sizeof(option), 0);
 }
 
 /* Inserts DHCP option 255 into the received dhcp packet
@@ -383,7 +313,6 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 		goto out;
 
 	memcpy(dev.name, dev_config, RAI_OPTION_LEN);
-	dev.len = str_len(&dev);
 
 	/* Increment offset by 4 bytes for each VLAN (to accomodate VLAN headers */
 #pragma unroll VLAN_MAX_DEPTH
@@ -614,7 +543,7 @@ int xdp_dhcp_relay(struct xdp_md *ctx) {
 			bpf_printk("Going to write DHCP option 82 at offset %i", option_offset);
 
 			/* Insert Option 82 before END option */
-			if (write_dhcp_option_82(ctx, option_offset, &vlans, dev)) {
+			if (write_dhcp_option_82(ctx, option_offset, &vlans, &dev)) {
 				bpf_printk("Could not write DHCP option 82 at offset %i", option_offset);
 				//return XDP_ABORTED;
 				break;
