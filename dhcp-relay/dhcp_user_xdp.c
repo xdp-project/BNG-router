@@ -113,54 +113,54 @@ int main(int argc, char **argv) {
 	unsigned char *mac;
 	struct ifreq ifr;
 
-	while ((opt = getopt_long(argc, argv, "hui:d:m:s:", options, NULL)) !=
-		-1) {
+	while ((opt = getopt_long(argc, argv, "hui:d:m:s:", options, NULL)) != -1) {
 		switch (opt) {
-			case 'i':	/* Physical interface */
-				strncpy(dev, optarg, IF_NAMESIZE);
-				dev[IF_NAMESIZE - 1] = '\0';
-				ifindex = if_nametoindex(dev);
-				if (ifindex <= 0) {
-					printf("Couldn't find ifname:%s \n", dev);
-					return -EINVAL;
-				}
-				break;
-			case 'd':	/* DHCP server address */
-				if (inet_aton(optarg, &dhcp_server_addr) == 0) {
-					fprintf(stderr,
-						"Couldn't validate DHCP server IP address:%s\n",
-						optarg);
-					return -EINVAL;
-				}
-				dhcp_server_addr_set = true;
-				break;
-			case 's':	/* Relay agent address */
-				if (inet_aton(optarg, &relay_agent_addr) == 0) {
-					fprintf(stderr,
-						"Couldn't validate relay agent IP address:%s\n",
-						optarg);
-					return -EINVAL;
-				}
-				relay_agent_addr_set = true;
-				break;
-			case 'm':	/* Mode: skb or native */
-				if (strcmp(optarg, "skb") == 0) {
-					xdp_flags = XDP_FLAGS_SKB_MODE;
-				} else if (strcmp(optarg, "drv") != 0) {
-					fprintf(stderr, "Invalid mode: %s\n", optarg);
-					return -EINVAL;
-				}
-
-				break;
-			case 'u':	/* Unload XDP program */
-				do_unload = 1;
-				break;
-			case 'h':	/* Help menu */
-				print_usage(argv);
-				exit(0);
-			default:
-				fprintf(stderr, "Unknown option %s\n", argv[optind]);
+		case 'i':	/* Physical interface */
+			strncpy(dev, optarg, IF_NAMESIZE);
+			dev[IF_NAMESIZE - 1] = '\0';
+			ifindex = if_nametoindex(dev);
+			if (ifindex <= 0) {
+				printf("Couldn't find ifname:%s \n", dev);
 				return -EINVAL;
+			}
+			break;
+		case 'd':	/* DHCP server address */
+			if (inet_aton(optarg, &dhcp_server_addr) == 0) {
+				fprintf(stderr,
+					"Couldn't validate DHCP server IP address:%s\n",
+					optarg);
+				return -EINVAL;
+			}
+			dhcp_server_addr_set = true;
+			break;
+		case 's':	/* Relay agent address */
+			if (inet_aton(optarg, &relay_agent_addr) == 0) {
+				fprintf(stderr,
+					"Couldn't validate relay agent IP address:%s\n",
+					optarg);
+				return -EINVAL;
+			}
+			relay_agent_addr_set = true;
+			break;
+		case 'm':	/* Mode: skb or native */
+			if (strcmp(optarg, "skb") == 0) {
+				xdp_flags = XDP_FLAGS_SKB_MODE;
+			} else if (strcmp(optarg, "drv") != 0) {
+				fprintf(stderr, "Invalid mode: %s\n", optarg);
+				return -EINVAL;
+			}
+
+			break;
+		case 'u':	/* Unload XDP program */
+			do_unload = 1;
+			break;
+
+		case 'h':	/* Help menu */
+			print_usage(argv);
+			exit(0);
+		default:
+			fprintf(stderr, "Unknown option %s\n", argv[optind]);
+			return -EINVAL;
 		}
 	}
 
